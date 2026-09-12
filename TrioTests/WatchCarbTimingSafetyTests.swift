@@ -91,6 +91,66 @@ import Testing
                 pendingRequestID: "current"
             )
         )
+
+        var pendingRequestID: String? = "newer"
+        #expect(
+            !WatchBolusRecommendationProtocol.consumeMatchingResponse(
+                responseID: "older",
+                pendingRequestID: &pendingRequestID
+            )
+        )
+        #expect(pendingRequestID == "newer")
+        #expect(
+            WatchBolusRecommendationProtocol.consumeMatchingResponse(
+                responseID: "newer",
+                pendingRequestID: &pendingRequestID
+            )
+        )
+        #expect(pendingRequestID == nil)
+    }
+
+    @Test("Bolus editing uses exact whole increments") func bolusUsesCanonicalSteps() {
+        let maximum: Decimal = 10
+
+        #expect(WatchBolusDose.amount(stepCount: 3, increment: 0.05, maximum: maximum) == 0.15)
+        #expect(WatchBolusDose.amount(stepCount: 6, increment: 0.05, maximum: maximum) == 0.30)
+        #expect(WatchBolusDose.amount(stepCount: 3, increment: 0.025, maximum: maximum) == 0.075)
+        #expect(WatchBolusDose.amount(stepCount: 3, increment: 0.1, maximum: maximum) == 0.3)
+    }
+
+    @Test("Recommendations normalize down to pump increments") func bolusRecommendationNormalization() {
+        let maximum: Decimal = 10
+
+        #expect(WatchBolusDose.normalized(0.15, increment: 0.05, maximum: maximum) == 0.15)
+        #expect(WatchBolusDose.normalized(0.30, increment: 0.05, maximum: maximum) == 0.30)
+        #expect(WatchBolusDose.normalized(0.074, increment: 0.025, maximum: maximum) == 0.05)
+        #expect(WatchBolusDose.normalized(12, increment: 0.1, maximum: maximum) == maximum)
+    }
+
+    @Test("Maximum bolus never exceeds a non-divisible limit") func bolusMaximumClamping() {
+        let maximum: Decimal = 10.01
+
+        #expect(WatchBolusDose.maximumStepCount(maximum: maximum, increment: 0.05) == 200)
+        #expect(WatchBolusDose.amount(stepCount: 201, increment: 0.05, maximum: maximum) == 10)
+    }
+
+    @Test("Invalid bolus inputs fail closed") func invalidBolusInputs() {
+        let notANumber = Decimal.nan
+
+        #expect(WatchBolusDose.validatedIncrement(0) == WatchBolusDose.fallbackIncrement)
+        #expect(WatchBolusDose.validatedIncrement(-0.05) == WatchBolusDose.fallbackIncrement)
+        #expect(WatchBolusDose.maximumStepCount(maximum: -1, increment: 0.05) == 0)
+        #expect(WatchBolusDose.stepCount(for: -1, increment: 0.05, maximum: 10) == 0)
+        #expect(WatchBolusDose.stepCount(for: notANumber, increment: 0.05, maximum: 10) == 0)
+        #expect(WatchBolusDose.stepCount(for: 1, increment: 0.05, maximum: notANumber) == 0)
+    }
+
+    @Test("Bolus formatting preserves the pump increment precision") func bolusFormattingPrecision() {
+        let locale = Locale(identifier: "en_US_POSIX")
+
+        #expect(WatchBolusDose.formatted(0.1, increment: 0.1, locale: locale) == "0.1")
+        #expect(WatchBolusDose.formatted(0.15, increment: 0.05, locale: locale) == "0.15")
+        #expect(WatchBolusDose.formatted(0.075, increment: 0.025, locale: locale) == "0.075")
     }
 
     @Test("Backdated recommendation requires complete valid simulation values") func simulationValidation() {

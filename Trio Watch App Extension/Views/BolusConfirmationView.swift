@@ -5,7 +5,7 @@ import WatchKit
 struct BolusConfirmationView: View {
     @Binding var navigationPath: NavigationPath
     let state: WatchState
-    @Binding var bolusAmount: Double
+    @Binding var bolusAmount: Decimal
     @Binding var confirmationProgress: Double
 
     @FocusState private var isCrownFocused: Bool
@@ -17,50 +17,56 @@ struct BolusConfirmationView: View {
     )
 
     var body: some View {
-        let bolusIncrement = Double(truncating: state.bolusIncrement as NSNumber)
-        let adjustedBolusAmount = floor(bolusAmount / bolusIncrement) * bolusIncrement
+        VStack(spacing: 8) {
+            Spacer(minLength: 0)
 
-        VStack(spacing: 10) {
-            Spacer()
-
-            VStack {
+            VStack(spacing: 6) {
                 if state.carbsAmount > 0 {
-                    HStack {
-                        Text("Carbs:")
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text("\(state.carbsAmount) g")
-                                .bold()
-                                .foregroundStyle(.orange)
-                            if state.carbsDateWasEdited {
-                                Text(state.carbsDate, style: .time)
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            } else {
-                                Text("Now")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+                    HStack(spacing: 8) {
+                        Image(systemName: "fork.knife")
+                            .accessibilityHidden(true)
+                        Text("\(state.carbsAmount) g")
+                        if state.carbsDateWasEdited {
+                            Text(state.carbsDate, style: .time)
+                        } else {
+                            Text("Now")
                         }
-                    }.padding(.horizontal)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Carbohydrates")
+                    .accessibilityValue(
+                        "\(state.carbsAmount) g, \(state.carbsDateWasEdited ? state.carbsDate.formatted(date: .omitted, time: .shortened) : String(localized: "Now"))"
+                    )
                 }
 
-                HStack {
-                    Text("Bolus")
-                    Spacer()
-                    Text(String(format: "%.2f \(String(localized: "U", comment: "Insulin unit"))", adjustedBolusAmount))
-                        .bold()
-                        .foregroundStyle(Color.insulin)
-                }.padding(.horizontal)
+                HStack(spacing: 5) {
+                    Image(systemName: "syringe.fill")
+                        .accessibilityHidden(true)
+                    Text(
+                        "\(WatchBolusDose.formatted(bolusAmount, increment: state.bolusIncrement)) \(String(localized: "U", comment: "Insulin unit"))"
+                    )
+                    .bold()
+                }
+                .font(.title3)
+                .foregroundStyle(Color.insulin)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Bolus")
+                .accessibilityValue(
+                    "\(WatchBolusDose.formatted(bolusAmount, increment: state.bolusIncrement)) \(String(localized: "U", comment: "Insulin unit"))"
+                )
             }
 
             ProgressView(value: confirmationProgress, total: 1.0)
                 .tint(confirmationProgress >= 1.0 ? .loopGreen : .gray)
                 .padding(.horizontal)
 
-            Text("To confirm, dial crown.").font(.footnote)
+            Text("Turn Crown to confirm")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             Button("Cancel") {
                 if state.carbsAmount > 0 {
@@ -103,7 +109,7 @@ struct BolusConfirmationView: View {
                         state.carbsDate = Date()
                         state.carbsDateWasEdited = false
                     }
-                    state.sendBolusRequest(Decimal(bolusAmount))
+                    state.sendBolusRequest(bolusAmount)
                     bolusAmount = 0 // reset bolus in state
                     confirmationProgress = 0 // reset auth progress
                     navigationPath.append(NavigationDestinations.acknowledgmentPending)
@@ -112,7 +118,6 @@ struct BolusConfirmationView: View {
                 WKInterfaceDevice.current().play(.click)
             }
         }
-        .navigationTitle("Confirm")
         .background(trioBackgroundColor)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

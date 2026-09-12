@@ -44,32 +44,31 @@ struct TreatmentMenuView: View {
     }
 
     var body: some View {
-        VStack {
-            List {
-                ForEach(treatments) { treatment in
-                    Button(action: {
-                        selectedTreatment = treatment
-                        onSelect()
-                    }) {
-                        HStack(spacing: 10) {
-                            switch treatment {
-                            case .meal:
-                                mealIcon
-                                Text(treatment.displayName)
-                            case .bolus:
-                                bolusIcon
-                                Text(treatment.displayName)
-                            case .mealBolusCombo:
-                                mealIcon
-                                bolusIcon
-                            }
+        List {
+            ForEach(treatments) { treatment in
+                Button(action: {
+                    selectedTreatment = treatment
+                    onSelect()
+                }) {
+                    HStack(spacing: 10) {
+                        switch treatment {
+                        case .meal:
+                            mealIcon
+                            Text(treatment.displayName)
+                        case .bolus:
+                            bolusIcon
+                            Text(treatment.displayName)
+                        case .mealBolusCombo:
+                            mealIcon
+                            bolusIcon
                         }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(PressableIconButtonStyle())
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
                 }
-            }.navigationTitle("Pick Treatment")
+                .buttonStyle(PressableIconButtonStyle())
+                .accessibilityLabel(treatment.displayName)
+            }
         }
     }
 
@@ -81,6 +80,7 @@ struct TreatmentMenuView: View {
             .padding(iconPadding)
             .background(Color.orange)
             .clipShape(Circle())
+            .accessibilityHidden(true)
     }
 
     var bolusIcon: some View {
@@ -91,6 +91,7 @@ struct TreatmentMenuView: View {
             .padding(iconPadding)
             .background(Color.insulin)
             .clipShape(Circle())
+            .accessibilityHidden(true)
     }
 }
 

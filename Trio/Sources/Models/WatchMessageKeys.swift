@@ -115,6 +115,96 @@ enum WatchBolusRecommendationProtocol {
         guard let responseID, let pendingRequestID else { return false }
         return responseID == pendingRequestID
     }
+
+    /// Consumes only the response for the currently pending request. Call this on the same
+    /// serial executor that applies the response so a newer request cannot be cleared by an
+    /// older response between validation and mutation.
+    static func consumeMatchingResponse(responseID: String?, pendingRequestID: inout String?) -> Bool {
+        guard responseMatchesPendingRequest(responseID: responseID, pendingRequestID: pendingRequestID) else {
+            return false
+        }
+        pendingRequestID = nil
+        return true
+    }
+}
+
+/// Converts Watch bolus input to whole pump-supported steps using Decimal arithmetic. The amount
+/// returned here is the single value used for display, confirmation, and transmission.
+enum WatchBolusDose {
+    static let fallbackIncrement: Decimal = 0.05
+
+    static func validatedIncrement(_ increment: Decimal) -> Decimal {
+        let number = NSDecimalNumber(decimal: increment)
+        guard number != .notANumber, number.doubleValue.isFinite, increment > 0 else {
+            return fallbackIncrement
+        }
+        return increment
+    }
+
+    static func maximumStepCount(maximum: Decimal, increment: Decimal) -> Int {
+        let maximumNumber = NSDecimalNumber(decimal: maximum)
+        guard maximumNumber != .notANumber, maximumNumber.doubleValue.isFinite, maximum > 0 else { return 0 }
+
+        let validIncrement = validatedIncrement(increment)
+        var quotient = maximum / validIncrement
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &quotient, 0, .down)
+
+        let roundedNumber = NSDecimalNumber(decimal: rounded)
+        guard roundedNumber != .notANumber,
+              roundedNumber.doubleValue.isFinite,
+              roundedNumber.compare(NSNumber(value: Int.max)) != .orderedDescending
+        else { return 0 }
+        return max(0, roundedNumber.intValue)
+    }
+
+    static func stepCount(for amount: Decimal, increment: Decimal, maximum: Decimal) -> Int {
+        let amountNumber = NSDecimalNumber(decimal: amount)
+        guard amountNumber != .notANumber, amountNumber.doubleValue.isFinite, amount > 0 else { return 0 }
+
+        let validIncrement = validatedIncrement(increment)
+        let maximumSteps = maximumStepCount(maximum: maximum, increment: validIncrement)
+        guard maximumSteps > 0 else { return 0 }
+
+        let clampedAmount = min(amount, maximum)
+        var quotient = clampedAmount / validIncrement
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &quotient, 0, .down)
+        let roundedNumber = NSDecimalNumber(decimal: rounded)
+        guard roundedNumber != .notANumber, roundedNumber.doubleValue.isFinite else { return 0 }
+        return min(maximumSteps, max(0, roundedNumber.intValue))
+    }
+
+    static func amount(stepCount: Int, increment: Decimal, maximum: Decimal) -> Decimal {
+        let validIncrement = validatedIncrement(increment)
+        let clampedSteps = min(
+            max(0, stepCount),
+            maximumStepCount(maximum: maximum, increment: validIncrement)
+        )
+        return Decimal(clampedSteps) * validIncrement
+    }
+
+    static func normalized(_ amount: Decimal, increment: Decimal, maximum: Decimal) -> Decimal {
+        self.amount(
+            stepCount: stepCount(for: amount, increment: increment, maximum: maximum),
+            increment: increment,
+            maximum: maximum
+        )
+    }
+
+    static func fractionDigits(for increment: Decimal) -> Int {
+        min(6, max(0, -Int(validatedIncrement(increment).exponent)))
+    }
+
+    static func formatted(_ amount: Decimal, increment: Decimal, locale: Locale = .current) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        let digits = fractionDigits(for: increment)
+        formatter.minimumFractionDigits = digits
+        formatter.maximumFractionDigits = digits
+        return formatter.string(from: NSDecimalNumber(decimal: amount)) ?? NSDecimalNumber(decimal: amount).stringValue
+    }
 }
 
 struct WatchBolusSimulationValues: Equatable {
