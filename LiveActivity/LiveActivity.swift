@@ -7,6 +7,7 @@ struct LiveActivity: Widget {
         let configuration = ActivityConfiguration(for: LiveActivityAttributes.self) { context in
             LiveActivityView(context: context)
                 .addIsWatchOS()
+                .widgetURL(URL(string: "Trio://"))
         } dynamicIsland: { context in
             let hasStaticColorScheme = context.state.glucoseColorScheme == "staticColor"
 
