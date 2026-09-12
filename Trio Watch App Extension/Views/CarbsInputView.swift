@@ -7,10 +7,6 @@ struct CarbsInputView: View {
     private enum InputMode {
         case carbs
         case date
-
-        mutating func toggle() {
-            self = self == .carbs ? .date : .carbs
-        }
     }
 
     @Binding var navigationPath: NavigationPath
@@ -71,104 +67,136 @@ struct CarbsInputView: View {
     )
 
     var body: some View {
-        let buttonLabel = continueToBolus ? String(localized: "Proceed", comment: "Button Label to Proceed to Bolus on Watch") :
-            String(localized: "Log Carbs", comment: "Button Label to Log Carbs on Watch")
+        let buttonLabel = continueToBolus ? String(localized: "Continue", comment: "Continue from carbs to bolus on Watch") :
+            String(localized: "Save", comment: "Save carbs on Watch")
 
         // TODO: introduce meal setting fpu enablement to conditional handle FPU
-        VStack {
-            Spacer()
+        VStack(spacing: 8) {
+            Spacer(minLength: 0)
 
-            HStack {
-                // "-" Button
-                Button(action: {
-                    switch inputMode {
-                    case .carbs:
-                        if carbsAmount > 0 {
-                            carbsAmount < 5 ? carbsAmount = 0 : (carbsAmount -= 5)
+            VStack(spacing: 8) {
+                // The values are the mode selector. Keep both targets large enough to avoid
+                // changing carbohydrates when the user intended to adjust the meal time.
+                HStack(spacing: 6) {
+                    Button {
+                        inputMode = .carbs
+                        isCrownFocused = true
+                    } label: {
+                        Text(String(format: "%.0f \(String(localized: "g", comment: "gram of carbs"))", carbsAmount))
+                            .fontWeight(.bold)
+                            .font(.system(.title2, design: .rounded))
+                            .foregroundStyle(
+                                carbsAmount > 0.0 && carbsAmount >= effectiveCarbsLimit ? .loopRed : .primary
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .background(inputMode == .carbs ? Color.orange.opacity(0.22) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(inputMode == .carbs ? Color.orange : Color.secondary.opacity(0.45), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Carbohydrates")
+                    .accessibilityValue(String(
+                        format: "%.0f \(String(localized: "g", comment: "gram of carbs"))",
+                        carbsAmount
+                    ))
+                    .accessibilityHint("Tap, then turn the Digital Crown to adjust")
+                    .accessibilityAddTraits(inputMode == .carbs ? .isSelected : [])
+
+                    Button {
+                        inputMode = .date
+                        isCrownFocused = true
+                    } label: {
+                        Group {
+                            if carbsDateWasEdited {
+                                Text(carbsDate, style: .time)
+                            } else {
+                                Text("Now")
+                            }
                         }
-                    case .date:
-                        carbsDate = WatchCarbEntryTiming.clamped(
-                            carbsDate.addingTimeInterval(-WatchCarbEntryTiming.buttonStep),
-                            relativeTo: initialDate
-                        )
-                        carbsDateWasEdited = true
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background(inputMode == .date ? Color.orange.opacity(0.22) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(inputMode == .date ? Color.orange : Color.secondary.opacity(0.45), lineWidth: 1)
+                        }
                     }
-                }) {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title3)
-                        .tint(.orange)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Time")
+                    .accessibilityValue(
+                        carbsDateWasEdited ? carbsDate.formatted(date: .omitted, time: .shortened) : String(localized: "Now")
+                    )
+                    .accessibilityHint("Tap, then turn the Digital Crown to adjust")
+                    .accessibilityAddTraits(inputMode == .date ? .isSelected : [])
                 }
-                .buttonStyle(.borderless)
-                .disabled(inputMode == .carbs && carbsAmount <= 0)
 
-                Spacer()
-
-                // Tap the amount/time to choose what the Digital Crown edits, matching Loop's watch flow.
-                VStack(spacing: 2) {
-                    Text(String(format: "%.0f \(String(localized: "g", comment: "gram of carbs"))", carbsAmount))
-                        .fontWeight(.bold)
-                        .font(.system(.title2, design: .rounded))
-                        .foregroundColor(
-                            carbsAmount > 0.0 && carbsAmount >= effectiveCarbsLimit ? .loopRed :
-                                (inputMode == .carbs ? .primary : .secondary)
-                        )
-
-                    if carbsDateWasEdited {
-                        Text(carbsDate, style: .time)
-                            .font(.footnote)
-                            .foregroundStyle(inputMode == .date ? Color.orange : Color.secondary)
-                    } else {
-                        Text("Now")
-                            .font(.footnote)
-                            .foregroundStyle(inputMode == .date ? Color.orange : Color.secondary)
+                HStack {
+                    Button(action: {
+                        switch inputMode {
+                        case .carbs:
+                            if carbsAmount > 0 {
+                                carbsAmount < 5 ? carbsAmount = 0 : (carbsAmount -= 5)
+                            }
+                        case .date:
+                            carbsDate = WatchCarbEntryTiming.clamped(
+                                carbsDate.addingTimeInterval(-WatchCarbEntryTiming.buttonStep),
+                                relativeTo: initialDate
+                            )
+                            carbsDateWasEdited = true
+                        }
+                    }) {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.title3)
+                            .frame(width: 44, height: 34)
                     }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    inputMode.toggle()
-                    isCrownFocused = true
-                }
-                .focusable(true)
-                .focused($isCrownFocused)
-                .digitalCrownRotation(
-                    crownValue,
-                    from: crownRange.lowerBound,
-                    through: crownRange.upperBound,
-                    by: 1,
-                    sensitivity: .medium,
-                    isContinuous: false,
-                    isHapticFeedbackEnabled: true
-                )
+                    .buttonStyle(.borderless)
+                    .tint(.orange)
+                    .disabled(inputMode == .carbs && carbsAmount <= 0)
+                    .accessibilityLabel(inputMode == .carbs ? "Decrease carbohydrates" : "Earlier meal time")
 
-                Spacer()
+                    Spacer()
 
-                // "+" Button
-                Button(action: {
-                    switch inputMode {
-                    case .carbs:
-                        carbsAmount = min(effectiveCarbsLimit, carbsAmount + 5)
-                    case .date:
-                        carbsDate = WatchCarbEntryTiming.clamped(
-                            carbsDate.addingTimeInterval(WatchCarbEntryTiming.buttonStep),
-                            relativeTo: initialDate
-                        )
-                        carbsDateWasEdited = true
+                    Button(action: {
+                        switch inputMode {
+                        case .carbs:
+                            carbsAmount = min(effectiveCarbsLimit, carbsAmount + 5)
+                        case .date:
+                            carbsDate = WatchCarbEntryTiming.clamped(
+                                carbsDate.addingTimeInterval(WatchCarbEntryTiming.buttonStep),
+                                relativeTo: initialDate
+                            )
+                            carbsDateWasEdited = true
+                        }
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                            .frame(width: 44, height: 34)
                     }
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .tint(.orange)
+                    .buttonStyle(.borderless)
+                    .tint(.orange)
+                    .disabled(inputMode == .carbs && carbsAmount >= effectiveCarbsLimit)
+                    .accessibilityLabel(inputMode == .carbs ? "Increase carbohydrates" : "Later meal time")
                 }
-                .buttonStyle(.borderless)
-                .disabled(inputMode == .carbs && carbsAmount >= effectiveCarbsLimit)
-            }.padding(.horizontal)
+            }
+            .padding(.horizontal)
+            .focusable(true)
+            .focused($isCrownFocused)
+            .digitalCrownRotation(
+                crownValue,
+                from: crownRange.lowerBound,
+                through: crownRange.upperBound,
+                by: 1,
+                sensitivity: .medium,
+                isContinuous: false,
+                isHapticFeedbackEnabled: true
+            )
 
-            Text("Carbohydrates")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.bottom)
-
-            Spacer()
+            Spacer(minLength: 0)
 
             if carbsAmount > 0.0 && carbsAmount >= effectiveCarbsLimit {
                 Text("Carbs Limit Reached!")

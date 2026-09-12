@@ -35,7 +35,7 @@ import WatchConnectivity
     var carbsDateWasEdited = false
     var fatAmount: Int = 0
     var proteinAmount: Int = 0
-    var bolusAmount: Double = 0.0
+    var bolusAmount: Decimal = 0
     var confirmationProgress: Double = 0.0
 
     // Safety limits
@@ -207,21 +207,21 @@ import WatchConnectivity
 
         // Recommended bolus is also not part of the WatchState message.
         if let recommendedBolus = message[WatchMessageKeys.recommendedBolus] as? NSNumber {
-            guard WatchBolusRecommendationProtocol.responseMatchesPendingRequest(
-                responseID: message[WatchMessageKeys.bolusRecommendationRequestID] as? String,
-                pendingRequestID: pendingBolusRecommendationRequestID
-            )
-            else {
-                Task { await WatchLogger.shared.log("⌚️ Ignoring stale or legacy bolus recommendation") }
-                return
-            }
-            Task {
-                await WatchLogger.shared.log("⌚️ Received recommended bolus: \(recommendedBolus)")
-            }
+            let responseID = message[WatchMessageKeys.bolusRecommendationRequestID] as? String
+            let recommendationError = message[WatchMessageKeys.bolusRecommendationError] as? String
             DispatchQueue.main.async {
-                self.pendingBolusRecommendationRequestID = nil
+                guard WatchBolusRecommendationProtocol.consumeMatchingResponse(
+                    responseID: responseID,
+                    pendingRequestID: &self.pendingBolusRecommendationRequestID
+                ) else {
+                    Task { await WatchLogger.shared.log("⌚️ Ignoring stale or legacy bolus recommendation") }
+                    return
+                }
+                Task {
+                    await WatchLogger.shared.log("⌚️ Received recommended bolus: \(recommendedBolus)")
+                }
                 self.recommendedBolus = recommendedBolus.decimalValue
-                self.bolusRecommendationError = message[WatchMessageKeys.bolusRecommendationError] as? String
+                self.bolusRecommendationError = recommendationError
                 self.showBolusCalculationProgress = false
             }
             return
@@ -563,8 +563,7 @@ import WatchConnectivity
 
         if let bolusIncrement = message[WatchMessageKeys.bolusIncrement] {
             if let decimalValue = (bolusIncrement as? NSNumber)?.decimalValue {
-                // limit minimum to 0.05 to avoid dealing with 0.025 increments
-                self.bolusIncrement = max(decimalValue, 0.05)
+                self.bolusIncrement = WatchBolusDose.validatedIncrement(decimalValue)
             }
         }
 

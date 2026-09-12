@@ -20,7 +20,7 @@ extension WatchState {
         }
 
         let message: [String: Any] = [
-            WatchMessageKeys.bolus: amount
+            WatchMessageKeys.bolus: NSDecimalNumber(decimal: amount)
         ]
 
         session.sendMessage(message, replyHandler: nil) { error in
