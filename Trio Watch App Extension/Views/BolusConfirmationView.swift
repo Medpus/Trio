@@ -28,9 +28,20 @@ struct BolusConfirmationView: View {
                     HStack {
                         Text("Carbs:")
                         Spacer()
-                        Text("\(state.carbsAmount) g")
-                            .bold()
-                            .foregroundStyle(.orange)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text("\(state.carbsAmount) g")
+                                .bold()
+                                .foregroundStyle(.orange)
+                            if state.carbsDateWasEdited {
+                                Text(state.carbsDate, style: .time)
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text("Now")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }.padding(.horizontal)
                 }
 
@@ -54,6 +65,8 @@ struct BolusConfirmationView: View {
             Button("Cancel") {
                 if state.carbsAmount > 0 {
                     state.carbsAmount = 0 // reset carbs in state
+                    state.carbsDate = Date()
+                    state.carbsDateWasEdited = false
                 }
                 bolusAmount = 0 // reset bolus in state
                 confirmationProgress = 0 // reset auth progress
@@ -81,8 +94,14 @@ struct BolusConfirmationView: View {
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     if state.carbsAmount > 0 {
-                        state.sendCarbsRequest(state.carbsAmount, Date())
+                        let entryDate = WatchCarbEntryTiming.submissionDate(
+                            selectedDate: state.carbsDate,
+                            wasEdited: state.carbsDateWasEdited
+                        )
+                        state.sendCarbsRequest(state.carbsAmount, entryDate)
                         state.carbsAmount = 0 // reset carbs in state
+                        state.carbsDate = Date()
+                        state.carbsDateWasEdited = false
                     }
                     state.sendBolusRequest(Decimal(bolusAmount))
                     bolusAmount = 0 // reset bolus in state

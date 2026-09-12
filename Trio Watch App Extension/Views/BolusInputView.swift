@@ -7,6 +7,7 @@ import WatchKit
 struct BolusInputView: View {
     @Binding var navigationPath: NavigationPath
     @State private var bolusAmount = 0.0
+    @State private var hasManuallyEditedBolus = false
 
     let state: WatchState
 
@@ -14,6 +15,16 @@ struct BolusInputView: View {
 
     private var effectiveBolusLimit: Double {
         Double(truncating: state.maxBolus as NSNumber)
+    }
+
+    private var crownBolusAmount: Binding<Double> {
+        Binding(
+            get: { bolusAmount },
+            set: { newValue in
+                hasManuallyEditedBolus = true
+                bolusAmount = min(max(newValue, 0), effectiveBolusLimit)
+            }
+        )
     }
 
     var trioBackgroundColor = LinearGradient(
@@ -43,6 +54,11 @@ struct BolusInputView: View {
                         HStack {
                             Text("Carbs:").bold().font(.subheadline).padding(.leading)
                             Text("\(state.carbsAmount) g").font(.subheadline).foregroundStyle(Color.orange)
+                            if state.carbsDateWasEdited {
+                                Text(state.carbsDate, style: .time).font(.caption2).foregroundStyle(Color.orange)
+                            } else {
+                                Text("Now").font(.caption2).foregroundStyle(Color.secondary)
+                            }
                             Spacer()
                         }
                     }
@@ -52,7 +68,10 @@ struct BolusInputView: View {
                     HStack {
                         // "-" Button
                         Button(action: {
-                            if bolusAmount > 0 { bolusAmount -= Double(truncating: state.bolusIncrement as NSNumber) }
+                            if bolusAmount > 0 {
+                                hasManuallyEditedBolus = true
+                                bolusAmount -= Double(truncating: state.bolusIncrement as NSNumber)
+                            }
                         }) {
                             Image(systemName: "minus.circle.fill")
                                 .font(.title3)
@@ -73,7 +92,7 @@ struct BolusInputView: View {
                             .focusable(true)
                             .focused($isCrownFocused)
                             .digitalCrownRotation(
-                                $bolusAmount,
+                                crownBolusAmount,
                                 from: 0,
                                 through: effectiveBolusLimit,
                                 by: Double(truncating: state.bolusIncrement as NSNumber),
@@ -86,6 +105,7 @@ struct BolusInputView: View {
 
                         // "+" Button
                         Button(action: {
+                            hasManuallyEditedBolus = true
                             bolusAmount = min(
                                 effectiveBolusLimit,
                                 bolusAmount + Double(truncating: state.bolusIncrement as NSNumber)
@@ -126,6 +146,13 @@ struct BolusInputView: View {
                     ))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    if let recommendationError = state.bolusRecommendationError {
+                        Text(recommendationError)
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                            .multilineTextAlignment(.center)
+                    }
                 }
             }
         }
@@ -146,6 +173,7 @@ struct BolusInputView: View {
             // Set initial bolus amount to recommended value
             // Only do this if user has not updated amount previously, e.g., when navigating to next and then back to this view
             if bolusAmount == 0 {
+                hasManuallyEditedBolus = false
                 state.requestBolusRecommendation()
                 bolusAmount = Double(truncating: NSDecimalNumber(decimal: state.recommendedBolus))
             }
@@ -153,9 +181,12 @@ struct BolusInputView: View {
         // Add onChange to update bolus amount when recommendation changes
         .onChange(of: state.recommendedBolus) { oldValue, newValue in
             // Only update if user hasn't modified the value OR if recommendation hasn't changed
-            if bolusAmount == 0 || oldValue != newValue {
+            if !hasManuallyEditedBolus, oldValue != newValue {
                 bolusAmount = Double(truncating: NSDecimalNumber(decimal: newValue))
             }
+        }
+        .onDisappear {
+            state.cancelBolusRecommendationRequest()
         }
     }
 }

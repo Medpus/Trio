@@ -205,6 +205,12 @@ extension WatchState {
     /// Sends a request to calculate a bolus recommendation based on the current carbs amount
     func requestBolusRecommendation() {
         guard let session = session, session.isReachable else {
+            pendingBolusRecommendationRequestID = nil
+            showBolusCalculationProgress = false
+            recommendedBolus = 0
+            bolusRecommendationError = String(
+                localized: "Recommendation unavailable. Connect to iPhone and try again."
+            )
             Task {
                 await WatchLogger.shared.log("⌚️ Bolus recommendation request aborted: session unreachable")
             }
@@ -215,9 +221,19 @@ extension WatchState {
             await WatchLogger.shared.log("⌚️ Requesting bolus recommendation for carbs: \(carbsAmount)")
         }
 
+        let requestID = UUID().uuidString
+        pendingBolusRecommendationRequestID = requestID
+        bolusRecommendationError = nil
+        showBolusCalculationProgress = true
+
         let message: [String: Any] = [
             WatchMessageKeys.requestBolusRecommendation: true,
-            WatchMessageKeys.carbs: carbsAmount
+            WatchMessageKeys.carbs: carbsAmount,
+            // A recommendation-specific key prevents an older phone app from mistaking this
+            // metadata for a command to persist a carbohydrate entry.
+            WatchMessageKeys.bolusRecommendationCarbsDate: carbsDate.timeIntervalSince1970,
+            WatchMessageKeys.carbsDateWasEdited: carbsDateWasEdited,
+            WatchMessageKeys.bolusRecommendationRequestID: requestID
         ]
 
         session.sendMessage(message, replyHandler: nil) { error in
@@ -226,7 +242,37 @@ extension WatchState {
                 await WatchLogger.shared.log("⌚️ Saving logs to disk as fallback!")
                 await WatchLogger.shared.persistLogsLocally()
             }
+            DispatchQueue.main.async {
+                guard self.pendingBolusRecommendationRequestID == requestID else { return }
+                self.pendingBolusRecommendationRequestID = nil
+                self.showBolusCalculationProgress = false
+                self.recommendedBolus = 0
+                self.bolusRecommendationError = String(
+                    localized: "Recommendation unavailable. Enter a bolus manually or try again."
+                )
+            }
         }
+
+        // `sendMessage` can succeed even when an older phone app does not understand
+        // the request/response ID contract. Never leave the Watch showing a spinner or
+        // reuse a recommendation from another request: expire this exact request only.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+            guard self.pendingBolusRecommendationRequestID == requestID else { return }
+            self.pendingBolusRecommendationRequestID = nil
+            self.showBolusCalculationProgress = false
+            self.recommendedBolus = 0
+            self.bolusRecommendationError = String(
+                localized: "Recommendation timed out. Make sure Trio is updated on iPhone, then try again."
+            )
+            Task {
+                await WatchLogger.shared.log("⌚️ Bolus recommendation timed out")
+            }
+        }
+    }
+
+    func cancelBolusRecommendationRequest() {
+        pendingBolusRecommendationRequestID = nil
+        showBolusCalculationProgress = false
     }
 
     func requestWatchStateUpdate() {
