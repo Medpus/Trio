@@ -561,6 +561,13 @@ final class BaseWatchManager: NSObject, WCSessionDelegate, Injectable, WatchMana
         Task { @MainActor [weak self] in
             guard let self else { return }
 
+            // Recommendation metadata includes carbohydrates and an optional meal time, but it is
+            // never a treatment command. Handle it first and return so it cannot reach persistence.
+            if WatchTreatmentRequestKind.classify(message) == .bolusRecommendation {
+                self.handleBolusRecommendationRequest(message)
+                return
+            }
+
             if let requestWatchUpdate = message[WatchMessageKeys.requestWatchUpdate] as? String,
                requestWatchUpdate == WatchMessageKeys.watchState
             {
@@ -590,6 +597,17 @@ final class BaseWatchManager: NSObject, WCSessionDelegate, Injectable, WatchMana
                       message[WatchMessageKeys.bolus] == nil
             {
                 let date = Date(timeIntervalSince1970: timestamp)
+                guard carbsAmount > 0,
+                      Decimal(carbsAmount) <= settingsManager.settings.maxCarbs,
+                      WatchCarbEntryTiming.isValidForReceipt(date)
+                else {
+                    self.sendAcknowledgment(
+                        toWatch: false,
+                        message: String(localized: "Error! The carbohydrate amount or meal time is invalid."),
+                        ackCode: .genericFailure
+                    )
+                    return
+                }
                 debug(.watchManager, "📱 Received carbs request from watch: \(carbsAmount)g at \(date)")
                 self.handleCarbsRequest(carbsAmount, date)
             } else if let bolusAmount = message[WatchMessageKeys.bolus] as? Double,
@@ -597,6 +615,17 @@ final class BaseWatchManager: NSObject, WCSessionDelegate, Injectable, WatchMana
                       let timestamp = message[WatchMessageKeys.date] as? TimeInterval
             {
                 let date = Date(timeIntervalSince1970: timestamp)
+                guard carbsAmount > 0,
+                      Decimal(carbsAmount) <= settingsManager.settings.maxCarbs,
+                      WatchCarbEntryTiming.isValidForReceipt(date)
+                else {
+                    self.sendAcknowledgment(
+                        toWatch: false,
+                        message: String(localized: "Error! The carbohydrate amount or meal time is invalid."),
+                        ackCode: .genericFailure
+                    )
+                    return
+                }
                 debug(
                     .watchManager,
                     "📱 Received meal bolus combo request from watch: \(bolusAmount)U, \(carbsAmount)g at \(date)"
@@ -631,58 +660,140 @@ final class BaseWatchManager: NSObject, WCSessionDelegate, Injectable, WatchMana
                 debug(.watchManager, "📱 Received cancel temp target request from watch")
                 self.handleCancelTempTarget()
             }
+        }
+    }
 
-            if message[WatchMessageKeys.requestBolusRecommendation] as? Bool == true {
-                let carbs = message[WatchMessageKeys.carbs] as? Int ?? 0
+    private func handleBolusRecommendationRequest(_ message: [String: Any]) {
+        let requestID = message[WatchMessageKeys.bolusRecommendationRequestID] as? String
+        let carbsDateWasEdited = message[WatchMessageKeys.carbsDateWasEdited] as? Bool ?? false
 
-                var minPredBG: Decimal = 54
+        guard let carbs = message[WatchMessageKeys.carbs] as? Int,
+              carbs >= 0,
+              Decimal(carbs) <= settingsManager.settings.maxCarbs
+        else {
+            sendBolusRecommendation(
+                0,
+                requestID: requestID,
+                error: String(localized: "Recommendation unavailable because the carbohydrate amount is invalid.")
+            )
+            return
+        }
 
-                Task { [weak self] in
-                    guard let self = self else { return }
-
-                    do {
-                        // Fetch determination data
-                        let determinationIds = try await determinationStorage.fetchLastDeterminationObjectID(
-                            predicate: NSPredicate.predicateFor30MinAgoForDetermination
-                        )
-                        let determinationObjects: [OrefDetermination] = try await CoreDataStack.shared.getNSManagedObject(
-                            with: determinationIds,
-                            context: backgroundContext
-                        )
-
-                        await MainActor.run {
-                            minPredBG = determinationObjects.first?.minPredBGFromReason ?? 54
-                        }
-
-                    } catch let error as CoreDataError {
-                        debug(.default, "Core Data error: \(error)")
-                    } catch {
-                        debug(.default, "Unexpected error: \(error)")
-                    }
-
-                    // Get recommendation from BolusCalculationManager
-                    let result = await bolusCalculationManager.handleBolusCalculation(
-                        carbs: Decimal(carbs),
-                        useFattyMealCorrection: false,
-                        useSuperBolus: false,
-                        lastLoopDate: apsManager.lastLoopDate,
-                        minPredBG: minPredBG,
-                        simulatedCOB: nil,
-                        isBackdated: false // we cannot backdate carbs via watch
-                    )
-
-                    // Send recommendation back to watch
-                    let recommendationMessage: [String: Any] = [
-                        WatchMessageKeys.recommendedBolus: NSDecimalNumber(decimal: result.insulinCalculated)
-                    ]
-
-                    if let session = self.session, session.isReachable {
-                        debug(.watchManager, "📱 Sending recommendedBolus: \(result.insulinCalculated)")
-                        session.sendMessage(recommendationMessage, replyHandler: nil)
-                    }
-                }
+        let carbsDate: Date
+        if carbsDateWasEdited {
+            guard let timestamp = message[WatchMessageKeys.bolusRecommendationCarbsDate] as? TimeInterval,
+                  timestamp.isFinite
+            else {
+                sendBolusRecommendation(
+                    0,
+                    requestID: requestID,
+                    error: String(localized: "Recommendation unavailable because the meal time is invalid.")
+                )
                 return
             }
+            carbsDate = Date(timeIntervalSince1970: timestamp)
+            guard WatchCarbEntryTiming.isValidForReceipt(carbsDate) else {
+                sendBolusRecommendation(
+                    0,
+                    requestID: requestID,
+                    error: String(localized: "Recommendation unavailable because the meal time is outside the allowed range.")
+                )
+                return
+            }
+        } else {
+            carbsDate = Date()
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            var minPredBG: Decimal
+            var simulatedCOB: Int16?
+
+            if carbsDateWasEdited {
+                guard let simulatedDetermination = await apsManager.simulateDetermineBasal(
+                    simulatedCarbsAmount: Decimal(carbs),
+                    simulatedBolusAmount: 0,
+                    simulatedCarbsDate: carbsDate
+                ),
+                    let simulatedCobValue = simulatedDetermination.cob,
+                    let simulatedMinPredBG = simulatedDetermination.minPredBGFromReason
+                else {
+                    sendBolusRecommendation(
+                        0,
+                        requestID: requestID,
+                        error: String(localized: "Recommendation unavailable because the meal-time simulation failed.")
+                    )
+                    return
+                }
+
+                guard let simulationValues = WatchBolusSimulationValues.validated(
+                    cob: simulatedCobValue,
+                    minPredBG: simulatedMinPredBG
+                )
+                else {
+                    sendBolusRecommendation(
+                        0,
+                        requestID: requestID,
+                        error: String(localized: "Recommendation unavailable because the meal-time simulation was invalid.")
+                    )
+                    return
+                }
+
+                simulatedCOB = simulationValues.cob
+                minPredBG = simulationValues.minPredBG
+            } else {
+                do {
+                    let determinationIds = try await determinationStorage.fetchLastDeterminationObjectID(
+                        predicate: NSPredicate.predicateFor30MinAgoForDetermination
+                    )
+                    let determinationObjects: [OrefDetermination] = try await CoreDataStack.shared.getNSManagedObject(
+                        with: determinationIds,
+                        context: backgroundContext
+                    )
+                    guard let currentMinPredBG = determinationObjects.first?.minPredBGFromReason else {
+                        throw CoreDataError.fetchError(function: #function, file: #file)
+                    }
+                    minPredBG = currentMinPredBG
+                } catch {
+                    debug(.watchManager, "Unable to fetch a safe bolus recommendation input: \(error)")
+                    sendBolusRecommendation(
+                        0,
+                        requestID: requestID,
+                        error: String(localized: "Recommendation unavailable because current prediction data is missing.")
+                    )
+                    return
+                }
+            }
+
+            let result = await bolusCalculationManager.handleBolusCalculation(
+                carbs: Decimal(carbs),
+                useFattyMealCorrection: false,
+                useSuperBolus: false,
+                lastLoopDate: apsManager.lastLoopDate,
+                minPredBG: minPredBG,
+                simulatedCOB: simulatedCOB,
+                isBackdated: carbsDateWasEdited
+            )
+
+            sendBolusRecommendation(result.insulinCalculated, requestID: requestID)
+        }
+    }
+
+    private func sendBolusRecommendation(_ amount: Decimal, requestID: String?, error: String? = nil) {
+        var recommendationMessage: [String: Any] = [
+            WatchMessageKeys.recommendedBolus: NSDecimalNumber(decimal: amount)
+        ]
+        if let requestID {
+            recommendationMessage[WatchMessageKeys.bolusRecommendationRequestID] = requestID
+        }
+        if let error {
+            recommendationMessage[WatchMessageKeys.bolusRecommendationError] = error
+        }
+
+        if let session, session.isReachable {
+            debug(.watchManager, "📱 Sending recommendedBolus: \(amount)")
+            session.sendMessage(recommendationMessage, replyHandler: nil)
         }
     }
 

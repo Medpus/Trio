@@ -31,6 +31,8 @@ import WatchConnectivity
     /// treatments inputs
     /// used to store carbs for combined meal-bolus-treatments
     var carbsAmount: Int = 0
+    var carbsDate = Date()
+    var carbsDateWasEdited = false
     var fatAmount: Int = 0
     var proteinAmount: Int = 0
     var bolusAmount: Double = 0.0
@@ -61,6 +63,8 @@ import WatchConnectivity
     var isMealBolusCombo: Bool = false
 
     var recommendedBolus: Decimal = 0
+    var pendingBolusRecommendationRequestID: String?
+    var bolusRecommendationError: String?
 
     /// Snapshots older than this are dropped at the top of the WC delegate
     /// methods. Single source of truth for both `didReceiveMessage` and
@@ -203,11 +207,21 @@ import WatchConnectivity
 
         // Recommended bolus is also not part of the WatchState message.
         if let recommendedBolus = message[WatchMessageKeys.recommendedBolus] as? NSNumber {
+            guard WatchBolusRecommendationProtocol.responseMatchesPendingRequest(
+                responseID: message[WatchMessageKeys.bolusRecommendationRequestID] as? String,
+                pendingRequestID: pendingBolusRecommendationRequestID
+            )
+            else {
+                Task { await WatchLogger.shared.log("⌚️ Ignoring stale or legacy bolus recommendation") }
+                return
+            }
             Task {
                 await WatchLogger.shared.log("⌚️ Received recommended bolus: \(recommendedBolus)")
             }
             DispatchQueue.main.async {
+                self.pendingBolusRecommendationRequestID = nil
                 self.recommendedBolus = recommendedBolus.decimalValue
+                self.bolusRecommendationError = message[WatchMessageKeys.bolusRecommendationError] as? String
                 self.showBolusCalculationProgress = false
             }
             return
