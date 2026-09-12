@@ -180764,6 +180764,23 @@
         }
       }
     },
+    "No recommendation" : {
+      "comment" : "Bolus recommendation failed on Watch",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No recommendation"
+          }
+        },
+        "nb-NO" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen anbefaling"
+          }
+        }
+      }
+    },
     "No suggestion" : {
       "comment" : "Status Title",
       "extractionState" : "manual",
@@ -261058,6 +261075,23 @@
         }
       }
     },
+    "Tap, then turn the Digital Crown to adjust" : {
+      "comment" : "Accessibility hint for adjustable Watch values",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap, then turn the Digital Crown to adjust"
+          }
+        },
+        "nb-NO" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trykk, og vri deretter på Digital Crown for å justere"
+          }
+        }
+      }
+    },
     "To confirm, dial crown." : {
       "localizations" : {
         "bg" : {
@@ -272303,6 +272337,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "超快速：55分鐘（允許範圍35-100分鐘）"
+          }
+        }
+      }
+    },
+    "Turn Crown to confirm" : {
+      "comment" : "Watch bolus confirmation instruction",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Crown to confirm"
+          }
+        },
+        "nb-NO" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekreft med kronen"
           }
         }
       }
